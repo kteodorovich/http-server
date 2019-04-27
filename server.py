@@ -1,4 +1,8 @@
+#!/usr/bin/env python3
 import socket
+import os
+import sys
+import re
 
 
 def generate_headers(response_code, content_length):
@@ -15,50 +19,65 @@ def generate_headers(response_code, content_length):
     return header
 
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-print('made socket')
+def main():
+    if len(sys.argv) != 2:
+        print('Server requires one CLI argument in format `hostname:port`', file=sys.stderr)
+        return
 
-host = socket.gethostname()
-port = 8080
+    args = re.match('([a-zA-Z0-9.]+):([0-9]+)', sys.argv[1])
+    if args is None:
+        print('CLI argument must be in format `hostname:port`', file=sys.stderr)
+        return
 
-s.bind((host, port))
+    host = args.group(1)
+    port = int(args.group(2))
 
-s.listen(5)
-print('listening...\n')
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    print('made socket')
 
-while True:
-    client, address = s.accept()
-    print('got connection from %s' % str(address))
+    s.bind((host, port))
 
-    PACKET_SIZE = 1024
-    print("CLIENT", client)
+    s.listen(5)
+    print('listening...\n')
 
-    # receive client data, decode
-    data = client.recv(PACKET_SIZE).decode()
+    while True:
+        client, address = s.accept()
+        print('got connection from %s' % str(address))
 
-    request_method = data.split(' ')[0]
+        PACKET_SIZE = 1024
+        print("CLIENT", client)
 
-    if request_method == 'GET':
-        file_requested = data.split(' ')[1]
-        filepath_to_serve = '.' + file_requested
+        # receive client data, decode
+        data = client.recv(PACKET_SIZE).decode()
 
-        print("serving web page [{fp}]".format(fp=filepath_to_serve))
-        response_data = ''
+        request_method = data.split(' ')[0]
 
-        try:
-            f = open(filepath_to_serve, 'rb')
-            response_data = f.read()
-            f.close()
-            response_header = generate_headers(200, len(response_data))
+        if request_method == 'GET':
+            file_requested = data.split(' ')[1]
+            filepath_to_serve = '.' + file_requested
 
-        except Exception as e:
-            print("file not found. serving 404 page.")
-            response_header = generate_headers(404, 0)
+            print("serving web page [{fp}]".format(fp=filepath_to_serve))
+            response_data = ''
 
-        f = open(filepath_to_serve, 'rb')
+            if os.path.isdir(filepath_to_serve):
+                response_data = 'Directory listing of ' + filepath_to_serve + ':\n\n'.join(os.listdir(filepath_to_serve))
+                response_header = generate_headers(200, len(response_data))
 
-        response = response_header.encode() + response_data
-        f.close()
+            else:
+                try:
+                    with open(filepath_to_serve, 'rb') as f:
+                        response_data = f.read()
+                        response_header = generate_headers(200, len(response_data))
 
-        client.send(response)
-    client.close()
+                except EnvironmentError:
+                    print("file not found. serving 404 page.")
+                    response_header = generate_headers(404, 0)
+
+            response = response_header.encode() + response_data.encode()
+
+            client.send(response)
+        client.close()
+
+
+if __name__ == '__main__':
+    main()
